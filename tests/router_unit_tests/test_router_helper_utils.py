@@ -977,6 +977,20 @@ def test_update_settings(model_list):
     assert router.allowed_fails == 20
 
 
+def test_update_settings_retry_policy(model_list):
+    """update_settings must accept retry_policy and coerce a dict to RetryPolicy."""
+    from litellm.types.router import RetryPolicy
+
+    router = Router(model_list=model_list)
+    assert router.retry_policy is None
+
+    router.update_settings(retry_policy={"RateLimitErrorRetries": 3})
+
+    assert isinstance(router.retry_policy, RetryPolicy)
+    assert router.retry_policy.RateLimitErrorRetries == 3
+    assert router.get_settings()["retry_policy"].RateLimitErrorRetries == 3
+
+
 def test_common_checks_available_deployment(model_list):
     """Test if the 'common_checks_available_deployment' function is working correctly"""
     router = Router(model_list=model_list)
@@ -997,9 +1011,7 @@ def test_filter_cooldown_deployments(model_list):
         healthy_deployments=router._get_all_deployments(model_name="gpt-5-mini"),  # type: ignore
         cooldown_deployments=[],
     )
-    assert len(deployments) == len(
-        router._get_all_deployments(model_name="gpt-5-mini")
-    )
+    assert len(deployments) == len(router._get_all_deployments(model_name="gpt-5-mini"))
 
 
 def test_track_deployment_metrics(model_list):
