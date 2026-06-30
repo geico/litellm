@@ -53,6 +53,7 @@ const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, 
           fieldsMap[field.field_name] = {
             ui_field_name: field.ui_field_name,
             field_description: field.field_description,
+            field_type: field.field_type,
             options: field.options,
             link: field.link,
           };
@@ -82,7 +83,7 @@ const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, 
     });
   }, [accessToken, userRole, userID]);
 
-  const handleSaveChanges = () => {
+  const handleSaveChanges = async () => {
     if (!accessToken) {
       return;
     }
@@ -90,8 +91,24 @@ const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, 
     const router_settings = formValue.routerSettings;
     console.log("router_settings", router_settings);
 
+    // Inputs are plain text, so List/Dictionary fields arrive as strings ("[]",
+    // "{}"). Parse them back to JSON before sending, else the backend 422s the
+    // whole payload (e.g. routing_groups -> "Input should be a valid list").
+    const NUMBER_FIELD_TYPES = new Set(["Integer", "Float"]);
+    const JSON_FIELD_TYPES = new Set(["List", "Dictionary"]);
+
+    // Fallbacks for when /router/settings metadata is unavailable.
     const numberKeys = new Set(["allowed_fails", "cooldown_time", "num_retries", "timeout", "retry_after"]);
-    const jsonKeys = new Set(["model_group_alias", "retry_policy"]);
+    const jsonKeys = new Set(["model_group_alias", "retry_policy", "routing_groups"]);
+
+    const isNumberField = (key: string) =>
+      NUMBER_FIELD_TYPES.has(routerFieldsMetadata[key]?.field_type) || numberKeys.has(key);
+
+    const isJsonField = (key: string, fallback: unknown) =>
+      JSON_FIELD_TYPES.has(routerFieldsMetadata[key]?.field_type) ||
+      jsonKeys.has(key) ||
+      // Anything that was loaded as an object/array was stringified for display.
+      (typeof fallback === "object" && fallback !== null);
 
     const parseInputValue = (key: string, raw: string | undefined, fallback: unknown) => {
       if (raw === undefined) return fallback;
@@ -100,12 +117,12 @@ const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, 
 
       if (v.toLowerCase() === "null") return null;
 
-      if (numberKeys.has(key)) {
+      if (isNumberField(key)) {
         const n = Number(v);
         return Number.isNaN(n) ? fallback : n;
       }
 
-      if (jsonKeys.has(key)) {
+      if (isJsonField(key, fallback)) {
         if (v === "") return null;
         try {
           return JSON.parse(v);
@@ -167,12 +184,11 @@ const RouterSettings: React.FC<RouterSettingsProps> = ({ accessToken, userRole, 
     };
 
     try {
-      setCallbacksCall(accessToken, payload);
+      await setCallbacksCall(accessToken, payload);
+      NotificationsManager.success("router settings updated successfully");
     } catch (error) {
-      NotificationsManager.fromBackend("Failed to update router settings: " + error);
+      NotificationsManager.fromBackend(error);
     }
-
-    NotificationsManager.success("router settings updated successfully");
   };
 
   if (!accessToken) {
