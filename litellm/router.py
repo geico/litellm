@@ -10134,6 +10134,7 @@ class Router:
             "fallbacks",
             "context_window_fallbacks",
             "model_group_retry_policy",
+            "retry_policy",
             "model_group_alias",
             "enable_weighted_failover",
         ]
@@ -10169,6 +10170,8 @@ class Router:
                                 ),
                             )
                             rebuild_routing_groups = True
+                    elif var == "retry_policy" and isinstance(value, dict):
+                        value = RetryPolicy(**value)
                     setattr(self, var, value)
             else:
                 verbose_router_logger.debug("Setting {} is not allowed".format(var))

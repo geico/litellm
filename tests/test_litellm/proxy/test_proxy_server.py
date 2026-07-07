@@ -605,9 +605,7 @@ def test_ui_extensionless_route_requires_restructure(tmp_path):
 
 
 def test_admin_ui_export_serves_nested_extensionless_routes():
-    out_dir = (
-        Path(litellm.__file__).parent / "proxy" / "_experimental" / "out"
-    )
+    out_dir = Path(litellm.__file__).parent / "proxy" / "_experimental" / "out"
     assert out_dir.is_dir(), f"missing UI export at {out_dir}"
 
     nested_html_offenders = [
@@ -619,8 +617,7 @@ def test_admin_ui_export_serves_nested_extensionless_routes():
         and "litellm-asset-prefix" not in path.parts
     ]
     assert not nested_html_offenders, (
-        "Nested routes must be named index.html. Offenders: "
-        f"{nested_html_offenders}"
+        "Nested routes must be named index.html. Offenders: " f"{nested_html_offenders}"
     )
 
     callback_index = out_dir / "mcp" / "oauth" / "callback" / "index.html"
@@ -630,9 +627,7 @@ def test_admin_ui_export_serves_nested_extensionless_routes():
     )
 
     fastapi_app = FastAPI()
-    fastapi_app.mount(
-        "/ui", StaticFiles(directory=str(out_dir), html=True), name="ui"
-    )
+    fastapi_app.mount("/ui", StaticFiles(directory=str(out_dir), html=True), name="ui")
     client = TestClient(fastapi_app)
 
     redirect = client.get(
@@ -640,7 +635,9 @@ def test_admin_ui_export_serves_nested_extensionless_routes():
         follow_redirects=False,
     )
     assert redirect.status_code == 307
-    assert redirect.headers["location"].endswith("/ui/mcp/oauth/callback/?code=abc&state=xyz")
+    assert redirect.headers["location"].endswith(
+        "/ui/mcp/oauth/callback/?code=abc&state=xyz"
+    )
 
     landed = client.get("/ui/mcp/oauth/callback?code=abc&state=xyz")
     assert landed.status_code == 200
@@ -3620,6 +3617,51 @@ async def test_add_router_settings_from_db_config_merge_logic():
 
 
 @pytest.mark.asyncio
+async def test_add_router_settings_from_db_config_applies_retry_policy_to_live_router():
+    """A retry_policy in the router_settings DB row must be applied to the live Router on startup."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from litellm.proxy.proxy_server import ProxyConfig
+    from litellm.router import Router
+    from litellm.types.router import RetryPolicy
+
+    proxy_config = ProxyConfig()
+    router = Router(
+        model_list=[
+            {
+                "model_name": "m",
+                "litellm_params": {
+                    "model": "openai/gpt-3.5-turbo",
+                    "api_key": "sk-fake",
+                },
+            }
+        ]
+    )
+
+    retry_policy = {"RateLimitErrorRetries": 3, "InternalServerErrorRetries": 5}
+    mock_db_config = MagicMock()
+    mock_db_config.param_value = {"retry_policy": retry_policy}
+
+    mock_prisma_client = MagicMock()
+    mock_prisma_client.db.litellm_config.find_first = AsyncMock(
+        return_value=mock_db_config
+    )
+
+    await proxy_config._add_router_settings_from_db_config(
+        config_data={"router_settings": {}},
+        llm_router=router,
+        prisma_client=mock_prisma_client,
+    )
+
+    assert isinstance(router.retry_policy, RetryPolicy)
+    assert router.retry_policy.RateLimitErrorRetries == 3
+    assert router.retry_policy.InternalServerErrorRetries == 5
+    # And the value round-trips back through get_settings (the read path used
+    # by /get/config/callbacks).
+    assert router.get_settings()["retry_policy"].RateLimitErrorRetries == 3
+
+
+@pytest.mark.asyncio
 async def test_add_router_settings_from_db_config_edge_cases():
     """
     Test edge cases for _add_router_settings_from_db_config method.
@@ -5902,15 +5944,16 @@ async def test_primary_spend_counter_redis_concurrent_seed_does_not_double_seed(
         if call.kwargs.get("nx") is True
     ]
     assert len(nx_writes) == 2
-    assert sorted(set_results) == [False, True], (
-        f"expected exactly one SET NX winner and one loser, got {set_results}"
-    )
+    assert sorted(set_results) == [
+        False,
+        True,
+    ], f"expected exactly one SET NX winner and one loser, got {set_results}"
     # Loser path executed: after the winner's SET NX returned True, the
     # losing coalesced() call falls back to async_get_cache to read the
     # winner's value rather than re-seeding.
-    assert get_after_set_count >= 1, (
-        "loser branch (else: read back winner's value) was never exercised"
-    )
+    assert (
+        get_after_set_count >= 1
+    ), "loser branch (else: read back winner's value) was never exercised"
 
 
 @pytest.mark.asyncio
@@ -7104,6 +7147,27 @@ def test_update_config_success_callback_normalizes_existing_mixed_case(
         assert resp.status_code == 200
         stored = prisma.db.litellm_config.rows["litellm_settings"]["success_callback"]
         assert set(stored) == {"langfuse", "sqs"}
+    finally:
+        restore()
+
+
+def test_update_config_persists_router_settings_retry_policy(_update_config_setup):
+    """/config/update must persist router_settings.retry_policy, merged with existing keys."""
+    client, prisma, restore = _update_config_setup(
+        initial_rows={"router_settings": {"num_retries": 2}}
+    )
+    try:
+        retry_policy = {"RateLimitErrorRetries": 3, "InternalServerErrorRetries": 5}
+        resp = client.post(
+            "/config/update",
+            json={"router_settings": {"retry_policy": retry_policy}},
+        )
+        assert resp.status_code == 200
+        stored = prisma.db.litellm_config.rows["router_settings"]
+        # The retry policy round-trips to the DB ...
+        assert stored["retry_policy"] == retry_policy
+        # ... and the pre-existing, untouched key is preserved.
+        assert stored["num_retries"] == 2
     finally:
         restore()
 
