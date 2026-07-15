@@ -1037,6 +1037,7 @@ def test_track_deployment_metrics(model_list):
         (litellm.exceptions.BadRequestError, "BadRequestError", 3),
         (litellm.exceptions.AuthenticationError, "AuthenticationError", 4),
         (litellm.exceptions.RateLimitError, "RateLimitError", 6),
+        (litellm.exceptions.InternalServerError, "InternalServerError", 5),
         (
             litellm.exceptions.ContentPolicyViolationError,
             "ContentPolicyViolationError",

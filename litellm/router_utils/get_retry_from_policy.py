@@ -28,7 +28,12 @@ def get_num_retries_from_retry_policy(
     TimeoutErrorRetries: Optional[int] = None
     RateLimitErrorRetries: Optional[int] = None
     ContentPolicyViolationErrorRetries: Optional[int] = None
+    InternalServerErrorRetries: Optional[int] = None
     """
+    # InternalServerError is defined late in exceptions.py. Import it lazily to
+    # avoid accessing a partially initialized module through the import cycle.
+    from litellm.exceptions import InternalServerError
+
     # if we can find the exception then in the retry policy -> return the number of retries
 
     if (
@@ -43,28 +48,25 @@ def get_num_retries_from_retry_policy(
     if isinstance(retry_policy, dict):
         retry_policy = RetryPolicy(**retry_policy)
 
-    if (
-        isinstance(exception, AuthenticationError)
-        and retry_policy.AuthenticationErrorRetries is not None
-    ):
-        return retry_policy.AuthenticationErrorRetries
-    if isinstance(exception, Timeout) and retry_policy.TimeoutErrorRetries is not None:
-        return retry_policy.TimeoutErrorRetries
-    if (
-        isinstance(exception, RateLimitError)
-        and retry_policy.RateLimitErrorRetries is not None
-    ):
-        return retry_policy.RateLimitErrorRetries
-    if (
-        isinstance(exception, ContentPolicyViolationError)
-        and retry_policy.ContentPolicyViolationErrorRetries is not None
-    ):
-        return retry_policy.ContentPolicyViolationErrorRetries
-    if (
-        isinstance(exception, BadRequestError)
-        and retry_policy.BadRequestErrorRetries is not None
-    ):
-        return retry_policy.BadRequestErrorRetries
+    match exception:
+        case AuthenticationError() if (
+            retry_policy.AuthenticationErrorRetries is not None
+        ):
+            return retry_policy.AuthenticationErrorRetries
+        case Timeout() if retry_policy.TimeoutErrorRetries is not None:
+            return retry_policy.TimeoutErrorRetries
+        case RateLimitError() if retry_policy.RateLimitErrorRetries is not None:
+            return retry_policy.RateLimitErrorRetries
+        case InternalServerError() if (
+            retry_policy.InternalServerErrorRetries is not None
+        ):
+            return retry_policy.InternalServerErrorRetries
+        case ContentPolicyViolationError() if (
+            retry_policy.ContentPolicyViolationErrorRetries is not None
+        ):
+            return retry_policy.ContentPolicyViolationErrorRetries
+        case BadRequestError() if retry_policy.BadRequestErrorRetries is not None:
+            return retry_policy.BadRequestErrorRetries
 
 
 def reset_retry_policy() -> RetryPolicy:
